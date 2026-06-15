@@ -144,6 +144,7 @@ function init(d){
   var now = new Date(d.today + 'T12:00:00');
   vY = now.getFullYear(); vM = now.getMonth();
   render();
+  setupGridEvents();   // один раз — обработчики на контейнере, не на ячейках
   document.getElementById('app').style.display = 'block';
 }
 
@@ -202,9 +203,6 @@ function render(){
     el.dataset.iso=iso;
     if(iso===today) el.classList.add('today');
     applyRangeCls(el,iso);
-    el.addEventListener('click', onClick);
-    el.addEventListener('mouseenter', onHover);
-    el.addEventListener('mouseleave', function(){ hover=null; render(); });
     grid.appendChild(el);
   }
 
@@ -230,19 +228,30 @@ function applyRangeCls(el,iso){
   }
 }
 
-function onClick(e){
-  var iso=e.currentTarget.dataset.iso;
-  if(!s1||(s1&&s2)){
-    s1=iso; s2=null;
-  } else {
-    s2=iso;
-    if(s2<s1){ var t=s1; s1=s2; s2=t; }
-  }
-  hover=null; updDisplay(); render();
-}
+// Event delegation на контейнере — переживает перерисовку grid.innerHTML=''
+function setupGridEvents(){
+  var grid=document.getElementById('cal');
 
-function onHover(e){
-  if(s1&&!s2){ hover=e.currentTarget.dataset.iso; render(); }
+  grid.addEventListener('click',function(e){
+    var el=e.target.closest?e.target.closest('[data-iso]'):null;
+    if(!el||el.classList.contains('other')) return;
+    var iso=el.dataset.iso;
+    if(!s1||(s1&&s2)){ s1=iso; s2=null; }
+    else { s2=iso; if(s2<s1){var t=s1;s1=s2;s2=t;} }
+    hover=null; updDisplay(); render();
+  });
+
+  grid.addEventListener('mouseover',function(e){
+    if(!s1||s2) return;
+    var el=e.target.closest?e.target.closest('[data-iso]'):null;
+    var iso=el&&!el.classList.contains('other')?el.dataset.iso:null;
+    if(iso!==hover){ hover=iso; render(); }
+  });
+
+  // Уходим за пределы сетки — убираем hover
+  grid.addEventListener('mouseleave',function(){
+    if(hover!==null){ hover=null; render(); }
+  });
 }
 
 function updDisplay(){
