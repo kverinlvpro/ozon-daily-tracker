@@ -1,0 +1,6 @@
+# clasp credentials (personal, не для шаринга)
+.clasprc.json
+
+# Windows
+Thumbs.db
+desktop.ini
