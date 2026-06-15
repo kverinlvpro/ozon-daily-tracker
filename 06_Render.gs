@@ -364,32 +364,30 @@ function saveDateKeys_(sh, dateKeys) {
  * Красный → жёлтый → зелёный по percentile внутри каждой метрики.
  * Одно правило на метрику = все блоки сравниваются между собой.
  */
+const GRADIENT_LABELS = ['CTR', 'Рекламный CTR'];
+
+/**
+ * Градиентная заливка строк CTR и Рекламный CTR.
+ * Отдельное правило на каждую строку — градиент считается внутри одного артикула по дням,
+ * а не между артикулами.
+ */
 function applyMetricColorScales_(sh, prods, nDays) {
-  const ctrRanges   = [];
-  const adCtrRanges = [];
+  const P     = SpreadsheetApp.InterpolationType.PERCENTILE;
+  const rules = [];
 
   prods.forEach((p, b) => {
     const topRow = HEADER_ROWS + b * BLOCK_H + 1;  // 1-based
     ROW_LABELS.forEach((label, li) => {
-      const rng = sh.getRange(topRow + li, FIRST_DATA_COL, 1, nDays);
-      if (label === 'CTR')           ctrRanges.push(rng);
-      else if (label === 'Рекламный CTR') adCtrRanges.push(rng);
+      if (GRADIENT_LABELS.indexOf(label) < 0) return;
+      rules.push(
+        SpreadsheetApp.newConditionalFormatRule()
+          .setGradientMinpointWithValue('#ea4335', P, '0')    // красный  — минимум
+          .setGradientMidpointWithValue('#fbbc04', P, '50')   // жёлтый   — медиана
+          .setGradientMaxpointWithValue('#34a853', P, '100')  // зелёный  — максимум
+          .setRanges([sh.getRange(topRow + li, FIRST_DATA_COL, 1, nDays)])
+          .build()
+      );
     });
-  });
-
-  const P = SpreadsheetApp.InterpolationType.PERCENTILE;
-  const rules = [];
-
-  [ctrRanges, adCtrRanges].forEach(ranges => {
-    if (!ranges.length) return;
-    rules.push(
-      SpreadsheetApp.newConditionalFormatRule()
-        .setGradientMinpointWithValue('#ea4335', P, '10')   // красный  — нижние 10%
-        .setGradientMidpointWithValue('#fbbc04', P, '50')   // жёлтый   — медиана
-        .setGradientMaxpointWithValue('#34a853', P, '90')   // зелёный  — верхние 10%
-        .setRanges(ranges)
-        .build()
-    );
   });
 
   sh.setConditionalFormatRules(rules);
