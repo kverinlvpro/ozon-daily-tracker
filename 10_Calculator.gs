@@ -1,15 +1,106 @@
+// ══════════════════════════════════════════════════════════════════
+//  САЙДБАР С КАЛЕНДАРЁМ
+// ══════════════════════════════════════════════════════════════════
+
+/** Открывает боковую панель с выбором периода */
+function showCalendarSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('CalendarSidebar')
+    .setTitle('📅 Период калькулятора')
+    .setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/** Вызывается из сайдбара при загрузке: возвращает список блоков и текущую дату */
+function getCalendarData() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+
+  if (!isCabinetSheet_(sh.getName())) {
+    return { error: 'Перейдите на лист кабинета (ИП Иванова, ООО...)' };
+  }
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  const colsToRead = Math.max(CALC_COL, 3);
+  const allData = lastRow > 0
+    ? sh.getRange(1, 1, lastRow, colsToRead).getValues()
+    : [];
+
+  const skus = [];
+  for (let b = 0; ; b++) {
+    const topIdx = HEADER_ROWS + b * BLOCK_H;
+    if (topIdx >= allData.length) break;
+    const sku      = String(allData[topIdx][0] || '').trim();
+    const name     = String(allData[topIdx][2] || '').trim();
+    const existing = String(allData[topIdx][CALC_COL - 1] || '').trim();
+    if (!sku) break;
+    skus.push({ sku, name: name.slice(0, 45), existing });
+  }
+
+  const nDays    = lastCol >= FIRST_DATA_COL ? lastCol - FIRST_DATA_COL + 1 : 0;
+  const dateKeys = nDays > 0 ? loadDateKeys_(sh, nDays).filter(Boolean) : [];
+
+  const activeRow      = sh.getActiveCell().getRow();
+  const activeBlockIdx = Math.max(0,
+    Math.min(
+      Math.floor((activeRow - HEADER_ROWS - 1) / BLOCK_H),
+      skus.length - 1
+    )
+  );
+
+  return {
+    sheetName:      sh.getName(),
+    skus,
+    dateKeys,
+    activeBlockIdx,
+    today: Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd')
+  };
+}
+
 /**
- * КАЛЬКУЛЯТОР ПЕРИОДА
- * ===================
- * Пользователь вводит диапазон дат в ячейку D строки «Обложка» каждого блока
- * (формат: "01.06-15.06" или "01.06–15.06") и нажимает меню.
- *
- * Функция считает по выбранным дням:
- *   — среднее для % метрик (CTR, Рекл.CTR, Кр в корзину, CR корзина→заказ)
- *   — сумму   для абсолютных (Показы, Заказы, Выкупы)
- *
- * Ячейки дней (F+) НЕ ТРОГАЮТСЯ.
+ * Вызывается из сайдбара: пишет диапазон в ячейки D и запускает калькулятор.
+ * opts: { sheetName, selectedSkus: ['sku1',...] | 'all', from: 'yyyy-MM-dd', to: 'yyyy-MM-dd' }
  */
+function applyCalcPeriod(opts) {
+  const ss      = SpreadsheetApp.getActive();
+  const sh      = ss.getSheetByName(opts.sheetName);
+  if (!sh) return { error: 'Лист не найден' };
+
+  const accounts = getAccounts_();
+  const account  = accounts.find(a => a.name === opts.sheetName);
+  if (!account) return { error: 'Кабинет не найден' };
+
+  const products = getActiveProducts_().filter(p => p.accountId === account.id);
+  const lastRow  = sh.getLastRow();
+  const rangeStr = formatCalcRangeStr_(opts.from, opts.to);
+  const skuSet   = opts.selectedSkus === 'all' ? null : new Set(opts.selectedSkus);
+
+  for (let b = 0; b < products.length; b++) {
+    const sku    = products[b].sku;
+    if (skuSet && !skuSet.has(sku)) continue;
+    const topRow = HEADER_ROWS + b * BLOCK_H + 1;
+    if (topRow > lastRow) break;
+    sh.getRange(topRow, CALC_COL).setValue(rangeStr);
+  }
+
+  runCalculatorForSheet_(sh, products);
+  return { ok: true, range: rangeStr };
+}
+
+/** Форматирует диапазон из 'yyyy-MM-dd' в '01.06–15.06' */
+function formatCalcRangeStr_(from, to) {
+  function fmt(dk) {
+    const [, m, d] = dk.split('-');
+    return `${d}.${m}`;
+  }
+  return from === to ? fmt(from) : `${fmt(from)}–${fmt(to)}`;
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+//  КАЛЬКУЛЯТОР ПЕРИОДА
+//  Среднее для % метрик, сумма для абсолютных. Дни (F+) не трогает.
+// ══════════════════════════════════════════════════════════════════
 
 // Метрики, для которых считается сумма (остальные — среднее)
 const SUM_LABELS = ['Показы', 'Заказы', 'Выкупы'];

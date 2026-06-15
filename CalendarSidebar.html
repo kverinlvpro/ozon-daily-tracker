@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 13px; color: #333; padding: 12px; background: #fff; }
+
+/* ── Header ── */
+h3 { font-size: 13px; font-weight: bold; color: #1a73e8; margin-bottom: 10px; }
+
+/* ── Calendar nav ── */
+.cal-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cal-nav button {
+  background: none; border: 1px solid #dadce0; border-radius: 4px;
+  cursor: pointer; font-size: 15px; color: #1a73e8;
+  padding: 1px 8px; line-height: 1.6;
+}
+.cal-nav button:hover { background: #e8f0fe; }
+.cal-nav .month-label { font-weight: bold; font-size: 13px; }
+
+/* ── Grid ── */
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 1px; margin-bottom: 10px;
+}
+.dow {
+  text-align: center; font-size: 10px; color: #888;
+  padding: 3px 0; font-weight: bold;
+}
+.day {
+  text-align: center; padding: 5px 0; cursor: pointer;
+  border-radius: 50%; font-size: 12px; line-height: 1.4;
+  transition: background 0.1s;
+}
+.day:hover { background: #e8f0fe; }
+.day.other  { color: #ccc; pointer-events: none; }
+.day.today  { font-weight: bold; color: #1a73e8; }
+.day.sel    { background: #1a73e8 !important; color: #fff; border-radius: 50%; }
+.day.rng    { background: #d2e3fc; border-radius: 0; }
+.day.rng-s  { background: #1a73e8; color: #fff; border-radius: 50% 0 0 50%; }
+.day.rng-e  { background: #1a73e8; color: #fff; border-radius: 0 50% 50% 0; }
+.day.hover-rng { background: #e8f0fe; border-radius: 0; }
+
+/* ── Result display ── */
+.result-box {
+  background: #f8f9fa; border: 1px solid #dadce0; border-radius: 6px;
+  padding: 7px 10px; margin-bottom: 10px;
+}
+.result-box .lbl { font-size: 10px; color: #888; margin-bottom: 2px; }
+.result-box .val { font-size: 15px; font-weight: bold; color: #1a73e8; }
+
+/* ── Target ── */
+.target-lbl { font-size: 11px; color: #555; margin-bottom: 5px; }
+.radio-row  { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
+.radio-row input { margin: 0; cursor: pointer; }
+
+/* ── SKU selector (shown when "one block" selected) ── */
+#sku-wrap { margin: 6px 0 0 18px; }
+select#sku-sel {
+  width: 100%; padding: 4px 6px; border: 1px solid #dadce0;
+  border-radius: 4px; font-size: 12px; color: #333;
+}
+
+/* ── Buttons ── */
+.btn-row { display: flex; gap: 8px; margin-top: 10px; }
+.btn { padding: 7px 0; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; flex: 1; }
+.btn-clear { background: #f1f3f4; color: #333; }
+.btn-clear:hover { background: #e8eaed; }
+.btn-apply { background: #1a73e8; color: #fff; }
+.btn-apply:hover { background: #1557b0; }
+.btn-apply:disabled { background: #bbb; cursor: default; }
+
+.status { margin-top: 8px; font-size: 11px; min-height: 14px; color: #188038; }
+.status.err { color: #d93025; }
+
+#err-msg { color: #d93025; font-size: 12px; padding: 10px 0; }
+</style>
+</head>
+<body>
+
+<div id="loading" style="color:#888;padding:20px 0">Загрузка...</div>
+<div id="err-msg" style="display:none"></div>
+
+<div id="app" style="display:none">
+  <h3>📅 Выбор периода</h3>
+
+  <div class="cal-nav">
+    <button onclick="prevMonth()">‹</button>
+    <span class="month-label" id="month-lbl"></span>
+    <button onclick="nextMonth()">›</button>
+  </div>
+
+  <div class="cal-grid" id="cal"></div>
+
+  <div class="result-box">
+    <div class="lbl">Выбранный период:</div>
+    <div class="val" id="range-val">— не выбран —</div>
+  </div>
+
+  <div class="target-lbl">Применить к:</div>
+  <label class="radio-row">
+    <input type="radio" name="tgt" value="one" checked onchange="onTargetChange()">
+    <span id="one-lbl">текущему блоку</span>
+  </label>
+  <label class="radio-row">
+    <input type="radio" name="tgt" value="all" onchange="onTargetChange()">
+    всем блокам на листе
+  </label>
+  <div id="sku-wrap">
+    <select id="sku-sel"></select>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-clear" onclick="clearSel()">Сбросить</button>
+    <button class="btn btn-apply" id="apply-btn" onclick="doApply()" disabled>Применить</button>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+var D = null; // data from server
+var vY, vM;  // view year/month
+var s1 = null, s2 = null; // start / end ISO dates
+var hover = null;
+var MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+var DOWS   = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+window.onload = function(){
+  google.script.run
+    .withSuccessHandler(init)
+    .withFailureHandler(function(e){ showErr(e.message); })
+    .getCalendarData();
+};
+
+function init(d){
+  document.getElementById('loading').style.display='none';
+  if(!d){ showErr('Нет данных'); return; }
+  if(d.error){ showErr(d.error); return; }
+  D = d;
+
+  // Fill SKU dropdown
+  var sel = document.getElementById('sku-sel');
+  sel.innerHTML = '';
+  d.skus.forEach(function(s, i){
+    var o = document.createElement('option');
+    o.value = s.sku;
+    o.textContent = s.sku + (s.name ? '  –  ' + s.name : '');
+    if(i === d.activeBlockIdx) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  // Label for "one block" = active block
+  var ab = d.skus[d.activeBlockIdx];
+  if(ab) document.getElementById('one-lbl').textContent = 'блоку «' + ab.sku + '»';
+
+  // Preload existing range of active block
+  if(ab && ab.existing) tryPreload(ab.existing);
+
+  // Init calendar to today
+  var now = new Date(d.today + 'T12:00:00');
+  vY = now.getFullYear(); vM = now.getMonth();
+  render();
+  document.getElementById('app').style.display = 'block';
+}
+
+function showErr(msg){
+  document.getElementById('loading').style.display='none';
+  var el = document.getElementById('err-msg');
+  el.textContent = msg; el.style.display='block';
+}
+
+function tryPreload(str){
+  var parts = str.match(/\d{1,2}\.\d{1,2}(?:\.\d{4})?/g);
+  if(!parts) return;
+  s1 = toISO(parts[0]);
+  s2 = parts[1] ? toISO(parts[1]) : s1;
+  updDisplay();
+}
+
+function toISO(dStr){
+  var p = dStr.split('.');
+  var y = p[2] || (D ? D.today.split('-')[0] : new Date().getFullYear());
+  return y+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');
+}
+function toRu(iso){
+  var p=iso.split('-'); return p[2]+'.'+p[1];
+}
+function isoDate(y,m,d){
+  return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+}
+
+function render(){
+  document.getElementById('month-lbl').textContent = MONTHS[vM]+' '+vY;
+  var grid = document.getElementById('cal');
+  grid.innerHTML='';
+
+  DOWS.forEach(function(d){
+    var el=document.createElement('div'); el.className='dow'; el.textContent=d; grid.appendChild(el);
+  });
+
+  var first = new Date(vY,vM,1);
+  var last  = new Date(vY,vM+1,0).getDate();
+  var off   = (first.getDay()+6)%7; // Mon=0
+
+  // Prev month filler
+  for(var i=0;i<off;i++){
+    var el=document.createElement('div'); el.className='day other'; el.textContent='';
+    grid.appendChild(el);
+  }
+
+  var today = D ? D.today : '';
+
+  for(var dd=1;dd<=last;dd++){
+    var iso = isoDate(vY,vM,dd);
+    var el  = document.createElement('div');
+    el.className='day';
+    el.textContent=dd;
+    el.dataset.iso=iso;
+    if(iso===today) el.classList.add('today');
+    applyRangeCls(el,iso);
+    el.addEventListener('click', onClick);
+    el.addEventListener('mouseenter', onHover);
+    el.addEventListener('mouseleave', function(){ hover=null; render(); });
+    grid.appendChild(el);
+  }
+
+  // Next month filler
+  var total=off+last, rem=(7-total%7)%7;
+  for(var i=1;i<=rem;i++){
+    var el=document.createElement('div'); el.className='day other'; el.textContent='';
+    grid.appendChild(el);
+  }
+}
+
+function applyRangeCls(el,iso){
+  var from=s1, to=s2||hover;
+  if(from && to && from>to){ var t=from; from=to; to=t; }
+
+  if(from && to){
+    if(iso===from && iso===to) el.classList.add('sel');
+    else if(iso===from) el.classList.add('rng-s');
+    else if(iso===to)   el.classList.add('rng-e');
+    else if(iso>from&&iso<to) el.classList.add(s2?'rng':'hover-rng');
+  } else if(from && iso===from){
+    el.classList.add('sel');
+  }
+}
+
+function onClick(e){
+  var iso=e.currentTarget.dataset.iso;
+  if(!s1||(s1&&s2)){
+    s1=iso; s2=null;
+  } else {
+    s2=iso;
+    if(s2<s1){ var t=s1; s1=s2; s2=t; }
+  }
+  hover=null; updDisplay(); render();
+}
+
+function onHover(e){
+  if(s1&&!s2){ hover=e.currentTarget.dataset.iso; render(); }
+}
+
+function updDisplay(){
+  var el=document.getElementById('range-val');
+  var btn=document.getElementById('apply-btn');
+  if(!s1){ el.textContent='— не выбран —'; btn.disabled=true; return; }
+  var r=toRu(s1);
+  if(s2 && s2!==s1) r+=(' – '+toRu(s2));
+  el.textContent=r;
+  btn.disabled=false;
+}
+
+function clearSel(){
+  s1=null; s2=null; hover=null;
+  updDisplay(); render();
+  document.getElementById('status').textContent='';
+  document.getElementById('status').className='status';
+}
+
+function prevMonth(){ vM--; if(vM<0){vM=11;vY--;} render(); }
+function nextMonth(){ vM++; if(vM>11){vM=0;vY++;} render(); }
+
+function onTargetChange(){
+  var v=document.querySelector('input[name="tgt"]:checked').value;
+  document.getElementById('sku-wrap').style.display=(v==='one'?'block':'none');
+}
+
+function doApply(){
+  if(!s1) return;
+  var tgt = document.querySelector('input[name="tgt"]:checked').value;
+  var selectedSkus;
+  if(tgt==='all'){
+    selectedSkus='all';
+  } else {
+    var skuSel=document.getElementById('sku-sel');
+    selectedSkus=[skuSel.value];
+  }
+
+  var btn=document.getElementById('apply-btn');
+  var st=document.getElementById('status');
+  btn.disabled=true;
+  st.textContent='Считаю...';
+  st.className='status';
+
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled=false;
+      if(r&&r.error){ st.textContent='❌ '+r.error; st.className='status err'; }
+      else { st.textContent='✅ Применено: '+(r&&r.range||''); st.className='status'; }
+    })
+    .withFailureHandler(function(e){
+      btn.disabled=false;
+      st.textContent='❌ '+e.message; st.className='status err';
+    })
+    .applyCalcPeriod({
+      sheetName:    D.sheetName,
+      selectedSkus: selectedSkus,
+      from: s1,
+      to:   s2||s1
+    });
+}
+</script>
+</body>
+</html>
