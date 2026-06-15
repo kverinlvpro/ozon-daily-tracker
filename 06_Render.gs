@@ -160,6 +160,9 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
   // Группируем строки метрик каждого блока (строка обложки остаётся видимой)
   applyRowGroups_(sh, prods.length);
 
+  // Градиентная заливка строк CTR и Рекламный CTR
+  if (nDays > 0) applyMetricColorScales_(sh, prods, nDays);
+
   log_('INFO', 'renderCabinet_',
     `Кабинет «${account.name}»: артикулов ${prods.length}, дней ${nDays}`);
 }
@@ -355,6 +358,43 @@ function saveDateKeys_(sh, dateKeys) {
     SpreadsheetApp.DeveloperMetadataVisibility.DOCUMENT
   );
 }
+
+/**
+ * Градиентная заливка строк CTR и Рекламный CTR по всем блокам.
+ * Красный → жёлтый → зелёный по percentile внутри каждой метрики.
+ * Одно правило на метрику = все блоки сравниваются между собой.
+ */
+function applyMetricColorScales_(sh, prods, nDays) {
+  const ctrRanges   = [];
+  const adCtrRanges = [];
+
+  prods.forEach((p, b) => {
+    const topRow = HEADER_ROWS + b * BLOCK_H + 1;  // 1-based
+    ROW_LABELS.forEach((label, li) => {
+      const rng = sh.getRange(topRow + li, FIRST_DATA_COL, 1, nDays);
+      if (label === 'CTR')           ctrRanges.push(rng);
+      else if (label === 'Рекламный CTR') adCtrRanges.push(rng);
+    });
+  });
+
+  const P = SpreadsheetApp.InterpolationType.PERCENTILE;
+  const rules = [];
+
+  [ctrRanges, adCtrRanges].forEach(ranges => {
+    if (!ranges.length) return;
+    rules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .setGradientMinpointWithValue('#ea4335', P, '10')   // красный  — нижние 10%
+        .setGradientMidpointWithValue('#fbbc04', P, '50')   // жёлтый   — медиана
+        .setGradientMaxpointWithValue('#34a853', P, '90')   // зелёный  — верхние 10%
+        .setRanges(ranges)
+        .build()
+    );
+  });
+
+  sh.setConditionalFormatRules(rules);
+}
+
 
 /** Читает массив dateKeys из метаданных листа. При отсутствии — возвращает массив пустых строк. */
 function loadDateKeys_(sh, nDays) {
