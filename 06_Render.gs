@@ -160,12 +160,6 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
   // Группируем строки метрик каждого блока (строка обложки остаётся видимой)
   applyRowGroups_(sh, prods.length);
 
-  // Если были введены диапазоны — пересчитываем калькулятор и прошлый период
-  if (Object.keys(calcRanges).length > 0) {
-    runCalculatorForSheet_(sh, prods);
-    runPrevPeriodForSheet_(sh, prods);
-  }
-
   log_('INFO', 'renderCabinet_',
     `Кабинет «${account.name}»: артикулов ${prods.length}, дней ${nDays}`);
 }
@@ -183,33 +177,25 @@ function formatBlock_(sh, topRow, nDays, analysis, dateKeys) {
   sh.getRange(topRow, 2, BLOCK_H, 1).merge().setVerticalAlignment('middle').setHorizontalAlignment('center').setWrap(true);
   sh.getRange(topRow, 3, BLOCK_H, 1).merge().setVerticalAlignment('middle').setWrap(true);
 
-  // колонка D — прошлый период (авто, серый фон)
+  // Батч-форматирование D (Прошлый период) и E (Калькулятор) за 2 вызова
+  const numFmts = ROW_LABELS.map(lbl => {
+    if (PERCENT_LABELS.indexOf(lbl) >= 0) return ['0.00"%"'];
+    if (lbl in METRIC_ROW_FIELD)          return ['#,##0'];
+    return ['@'];   // текст для Гипотезы/Комментария/Обложки
+  });
+  numFmts[IMAGE_ROW_OFFSET] = ['@'];  // строка Обложки — всегда текст
+
   sh.getRange(topRow, PREV_COL, BLOCK_H, 1)
-    .setBackground('#f1f3f4')
-    .setHorizontalAlignment('center')
-    .setFontColor('#555555')
-    .setWrap(false);
-  sh.getRange(topRow + IMAGE_ROW_OFFSET, PREV_COL).setNumberFormat('@').setFontStyle('italic');
+    .setBackground('#f1f3f4').setHorizontalAlignment('center')
+    .setFontColor('#555555').setWrap(false)
+    .setNumberFormats(numFmts);
+  sh.getRange(topRow + IMAGE_ROW_OFFSET, PREV_COL).setFontStyle('italic');
 
-  // колонка E — калькулятор периода (синий фон)
   sh.getRange(topRow, CALC_COL, BLOCK_H, 1)
-    .setBackground('#e8f0fe')
-    .setHorizontalAlignment('center')
-    .setFontColor('#000000')
-    .setWrap(false);
-  sh.getRange(topRow + IMAGE_ROW_OFFSET, CALC_COL).setNumberFormat('@').setFontStyle('italic');
-
-  // Числовые форматы для D и E
-  for (let li = 1; li < BLOCK_H; li++) {
-    const lbl = ROW_LABELS[li];
-    const fmt = PERCENT_LABELS.indexOf(lbl) >= 0 ? '0.00"%"'
-              : (lbl in METRIC_ROW_FIELD)         ? '#,##0'
-              : null;
-    if (fmt) {
-      sh.getRange(topRow + li, PREV_COL).setNumberFormat(fmt);
-      sh.getRange(topRow + li, CALC_COL).setNumberFormat(fmt);
-    }
-  }
+    .setBackground('#e8f0fe').setHorizontalAlignment('center')
+    .setFontColor('#000000').setWrap(false)
+    .setNumberFormats(numFmts);
+  sh.getRange(topRow + IMAGE_ROW_OFFSET, CALC_COL).setFontStyle('italic');
 
   // колонка F — названия строк (метрик)
   sh.getRange(topRow, 6, BLOCK_H, 1).setFontWeight('bold').setBackground('#f3f3f3').setFontColor('#000000');
