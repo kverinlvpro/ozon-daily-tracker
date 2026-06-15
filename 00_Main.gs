@@ -101,7 +101,8 @@ const METRIC_ROW_FIELD = {
 const PERCENT_LABELS = ['CTR', 'Рекламный CTR', 'Кр в корзину', 'CR корзина→заказ'];
 
 // Геометрия листа кабинета
-const FIRST_DATA_COL = 5;     // колонка E — первый день (A=Артикул,B=Имя,C=Наименование,D=Метрика)
+const FIRST_DATA_COL = 6;     // колонка F — первый день (A=Артикул,B=Имя,C=Наименование,D=Калькулятор,E=Метрика)
+const CALC_COL       = 4;     // колонка D — калькулятор периода
 const HEADER_ROWS = 1;        // строка 1 — заголовок с датами
 const IMAGE_ROW_HEIGHT = 120; // высота строки обложки, px
 const DAY_COL_WIDTH = 110;    // ширина колонки одного дня, px
@@ -231,6 +232,8 @@ function onOpen() {
     .addItem('🔁 Пересчитать метрики за 7 дней', 'recalculate7Days')
     .addItem('🔁 Пересчитать метрики за N дней…', 'recalculateNDaysMenu')
     .addItem('📊 Заполнить Рекл. CTR из Drive за N дней…', 'backfillAdCtrMenu')
+    .addSeparator()
+    .addItem('🧮 Пересчитать калькулятор периода', 'runCalculatorMenu')
     .addSeparator()
     .addItem('🔽 Развернуть все блоки', 'expandAllBlocks')
     .addItem('🔼 Свернуть все блоки', 'collapseAllBlocks')
