@@ -84,6 +84,7 @@ function applyCalcPeriod(opts) {
   }
 
   runCalculatorForSheet_(sh, products);
+  runPrevPeriodForSheet_(sh, products);
   return { ok: true, range: rangeStr };
 }
 
@@ -105,7 +106,7 @@ function formatCalcRangeStr_(from, to) {
 // Метрики, для которых считается сумма (остальные — среднее)
 const SUM_LABELS = ['Показы', 'Заказы', 'Выкупы'];
 
-/** Пункт меню: пересчитать калькулятор для всех кабинетных листов */
+/** Пункт меню: пересчитать калькулятор + прошлый период для всех кабинетных листов */
 function runCalculatorMenu() {
   const ss       = SpreadsheetApp.getActive();
   const accounts = getAccounts_();
@@ -117,6 +118,7 @@ function runCalculatorMenu() {
     if (!sh) continue;
     const prods = products.filter(p => p.accountId === account.id);
     total += runCalculatorForSheet_(sh, prods);
+    runPrevPeriodForSheet_(sh, prods);
   }
 
   ss.toast(`Обновлено блоков: ${total}`, '🧮 Калькулятор', 4);
@@ -164,7 +166,7 @@ function runCalculatorForSheet_(sh, prods) {
       if (li === IMAGE_ROW_OFFSET) continue;         // строка «Обложка» — там диапазон
 
       const rowIdx = topIdx + li;
-      const label  = String(allVals[rowIdx][FIRST_DATA_COL - 2] || ''); // col E = index 4
+      const label  = String(allVals[rowIdx][FIRST_DATA_COL - 2] || ''); // col F = index 5
 
       if (MANUAL_LABELS.indexOf(label) >= 0) continue;  // ручные строки — не трогаем
       if (!(label in METRIC_ROW_FIELD)) continue;
@@ -197,27 +199,128 @@ function runCalculatorForSheet_(sh, prods) {
 }
 
 /**
- * Читает сохранённые диапазоны из строк «Обложка» колонки D текущего листа.
+ * Читает сохранённые диапазоны из строк «Обложка» колонки CALC_COL.
  * Вызывается ДО sh.clear() в renderCabinet_, чтобы не потерять введённые даты.
+ * Поддерживает миграцию: если CALC_COL пуст, пробует CALC_COL-1 (старая позиция).
  * Возвращает {sku → строка диапазона}.
  */
 function readCalcRanges_(sh) {
-  const map    = {};
+  const map     = {};
   const lastRow = sh.getLastRow();
   if (lastRow < HEADER_ROWS + 1) return map;
 
-  // Читаем только col A (SKU) и col D (диапазон)
-  const data = sh.getRange(1, 1, lastRow, CALC_COL).getValues();
+  const colsToRead = CALC_COL;  // читаем до CALC_COL включительно
+  const data = sh.getRange(1, 1, lastRow, colsToRead).getValues();
 
   for (let b = 0; ; b++) {
     const topIdx = HEADER_ROWS + b * BLOCK_H;
     if (topIdx >= data.length) break;
     const sku = String(data[topIdx][0] || '').trim();
-    if (!sku) continue;
-    const val = String(data[topIdx][CALC_COL - 1] || '').trim();
-    if (val && parseDateRange_(val)) map[sku] = val;   // сохраняем только если парсится
+    if (!sku) break;
+
+    // Пробуем CALC_COL, при пустом — CALC_COL-1 (миграция со старой позиции)
+    const newVal = String(data[topIdx][CALC_COL - 1] || '').trim();
+    const oldVal = CALC_COL >= 2 ? String(data[topIdx][CALC_COL - 2] || '').trim() : '';
+    const val    = parseDateRange_(newVal) ? newVal
+                 : parseDateRange_(oldVal) ? oldVal
+                 : '';
+    if (val) map[sku] = val;
   }
   return map;
+}
+
+
+// ── Прошлый период ────────────────────────────────────────────────
+
+/**
+ * Вычисляет «прошлый период» той же длины, что заканчивается за день до from.
+ * Возвращает {from, to} в формате 'yyyy-MM-dd'.
+ */
+function computePrevPeriod_(from, to) {
+  const MS = 24 * 60 * 60 * 1000;
+  const a  = new Date(from + 'T00:00:00');
+  const b  = new Date(to   + 'T00:00:00');
+  const dur = Math.round((b - a) / MS);  // длина периода - 1 (inclusive)
+
+  const prevTo   = new Date(a.getTime() - MS);
+  const prevFrom = new Date(prevTo.getTime() - dur * MS);
+
+  function toKey(d) {
+    return d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+  }
+  return { from: toKey(prevFrom), to: toKey(prevTo) };
+}
+
+/**
+ * Заполняет колонку PREV_COL (D) для всех блоков с заданным диапазоном в CALC_COL (E).
+ * Строка «Обложка» PREV_COL получает строку вида "07.06–10.06", метрики — значения.
+ */
+function runPrevPeriodForSheet_(sh, prods) {
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < HEADER_ROWS + BLOCK_H || lastCol < FIRST_DATA_COL) return 0;
+
+  const nDays   = lastCol - FIRST_DATA_COL + 1;
+  if (nDays <= 0) return 0;
+
+  const dateKeys = loadDateKeys_(sh, nDays);
+  const allVals  = sh.getRange(1, 1, lastRow, lastCol).getValues();
+
+  const writes = [];
+  let updated  = 0;
+
+  for (let b = 0; b < prods.length; b++) {
+    const topIdx = HEADER_ROWS + b * BLOCK_H;
+    if (topIdx >= allVals.length) break;
+
+    // Читаем диапазон из CALC_COL (E) строки «Обложка»
+    const rangeRaw = String(allVals[topIdx][CALC_COL - 1] || '').trim();
+    if (!rangeRaw) continue;
+    const range = parseDateRange_(rangeRaw);
+    if (!range) continue;
+
+    // Вычисляем прошлый период
+    const prev = computePrevPeriod_(range.from, range.to);
+
+    // Индексы дней прошлого периода
+    const dayIdxs = [];
+    for (let i = 0; i < nDays; i++) {
+      const dk = dateKeys[i];
+      if (dk && dk >= prev.from && dk <= prev.to) dayIdxs.push(i);
+    }
+
+    // Строка «Обложка» PREV_COL — показываем период
+    const prevLabel = formatCalcRangeStr_(prev.from, prev.to);
+    writes.push({ row: topIdx + 1, col: PREV_COL, value: prevLabel });
+
+    if (!dayIdxs.length) continue;
+
+    // Метрики
+    for (let li = 1; li < BLOCK_H; li++) {
+      const rowIdx = topIdx + li;
+      const label  = String(allVals[rowIdx][FIRST_DATA_COL - 2] || '');
+      if (MANUAL_LABELS.indexOf(label) >= 0) continue;
+      if (!(label in METRIC_ROW_FIELD)) continue;
+
+      const vals = dayIdxs
+        .map(i => allVals[rowIdx][(FIRST_DATA_COL - 1) + i])
+        .filter(v => v !== '' && v !== null && v !== undefined)
+        .map(Number)
+        .filter(n => !isNaN(n));
+
+      if (!vals.length) { writes.push({ row: rowIdx + 1, col: PREV_COL, value: '' }); continue; }
+
+      const sum    = vals.reduce((a, x) => a + x, 0);
+      const result = SUM_LABELS.indexOf(label) >= 0 ? sum : sum / vals.length;
+      writes.push({ row: rowIdx + 1, col: PREV_COL, value: Math.round(result * 100) / 100 });
+    }
+    updated++;
+  }
+
+  for (const w of writes) sh.getRange(w.row, w.col).setValue(w.value);
+  return updated;
 }
 
 /**

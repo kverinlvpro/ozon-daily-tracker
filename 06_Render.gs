@@ -68,12 +68,13 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
   const values = [];
   for (let r = 0; r < nRows; r++) values.push(new Array(nCols).fill(''));
 
-  // Заголовок: A=Артикул, B=Имя, C=Наименование, D=Калькулятор, E=Период тестирования, F+=дни
+  // Заголовок: A=Артикул,B=Имя,C=Наименование,D=Прошлый период,E=Калькулятор,F=Период тестирования,G+=дни
   values[0][0] = 'Артикул';
   values[0][1] = 'Имя';
   values[0][2] = 'Наименование';
-  values[0][3] = 'Калькулятор';
-  values[0][4] = 'Период тестирования';
+  values[0][3] = 'Прошлый период';
+  values[0][4] = 'Калькулятор';
+  values[0][5] = 'Период тестирования';
   dateKeys.forEach((dk, i) => { values[0][(FIRST_DATA_COL - 1) + i] = dateLabel_(dk); });
 
   // Анализ по каждому SKU (для подсветки)
@@ -95,12 +96,12 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
     values[top][0] = p.sku;
     values[top][1] = p.manager || '';
     values[top][2] = cardName || p.name;
-    values[top][CALC_COL - 1] = calcRanges[p.sku] || '';  // D: восстанавливаем диапазон
+    values[top][CALC_COL - 1] = calcRanges[p.sku] || '';  // E: восстанавливаем диапазон калькулятора
 
     for (let li = 0; li < BLOCK_H; li++) {
       const row = top + li;
       const label = ROW_LABELS[li];
-      values[row][4] = label;  // col E (0-based index 4)
+      values[row][5] = label;  // col F (0-based index 5)
 
       for (let i = 0; i < nDays; i++) {
         const col = (FIRST_DATA_COL - 1) + i;
@@ -146,8 +147,9 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
   sh.setColumnWidth(1, 120);   // A: Артикул
   sh.setColumnWidth(2, 90);    // B: Имя (менеджер)
   sh.setColumnWidth(3, 200);   // C: Наименование
-  sh.setColumnWidth(4, 130);   // D: Калькулятор
-  sh.setColumnWidth(5, 150);   // E: Метрика
+  sh.setColumnWidth(4, 110);   // D: Прошлый период
+  sh.setColumnWidth(5, 110);   // E: Калькулятор
+  sh.setColumnWidth(6, 150);   // F: Метрика
   for (let i = 0; i < nDays; i++) sh.setColumnWidth(FIRST_DATA_COL + i, DAY_COL_WIDTH);
 
   prods.forEach((p, b) => {
@@ -158,9 +160,10 @@ function renderCabinet_(account, prods, accountData, settings, todayKey, display
   // Группируем строки метрик каждого блока (строка обложки остаётся видимой)
   applyRowGroups_(sh, prods.length);
 
-  // Если были введены диапазоны — пересчитываем калькулятор
+  // Если были введены диапазоны — пересчитываем калькулятор и прошлый период
   if (Object.keys(calcRanges).length > 0) {
     runCalculatorForSheet_(sh, prods);
+    runPrevPeriodForSheet_(sh, prods);
   }
 
   log_('INFO', 'renderCabinet_',
@@ -180,23 +183,36 @@ function formatBlock_(sh, topRow, nDays, analysis, dateKeys) {
   sh.getRange(topRow, 2, BLOCK_H, 1).merge().setVerticalAlignment('middle').setHorizontalAlignment('center').setWrap(true);
   sh.getRange(topRow, 3, BLOCK_H, 1).merge().setVerticalAlignment('middle').setWrap(true);
 
-  // колонка D — калькулятор периода
+  // колонка D — прошлый период (авто, серый фон)
+  sh.getRange(topRow, PREV_COL, BLOCK_H, 1)
+    .setBackground('#f1f3f4')
+    .setHorizontalAlignment('center')
+    .setFontColor('#555555')
+    .setWrap(false);
+  sh.getRange(topRow + IMAGE_ROW_OFFSET, PREV_COL).setNumberFormat('@').setFontStyle('italic');
+
+  // колонка E — калькулятор периода (синий фон)
   sh.getRange(topRow, CALC_COL, BLOCK_H, 1)
     .setBackground('#e8f0fe')
     .setHorizontalAlignment('center')
+    .setFontColor('#000000')
     .setWrap(false);
-  // Обложка-строка: поле ввода диапазона
   sh.getRange(topRow + IMAGE_ROW_OFFSET, CALC_COL).setNumberFormat('@').setFontStyle('italic');
-  // Числовые строки — формат как в дневных колонках
+
+  // Числовые форматы для D и E
   for (let li = 1; li < BLOCK_H; li++) {
     const lbl = ROW_LABELS[li];
-    const cr = sh.getRange(topRow + li, CALC_COL);
-    if (PERCENT_LABELS.indexOf(lbl) >= 0)   cr.setNumberFormat('0.00"%"');
-    else if (lbl in METRIC_ROW_FIELD)        cr.setNumberFormat('#,##0');
+    const fmt = PERCENT_LABELS.indexOf(lbl) >= 0 ? '0.00"%"'
+              : (lbl in METRIC_ROW_FIELD)         ? '#,##0'
+              : null;
+    if (fmt) {
+      sh.getRange(topRow + li, PREV_COL).setNumberFormat(fmt);
+      sh.getRange(topRow + li, CALC_COL).setNumberFormat(fmt);
+    }
   }
 
-  // колонка E — названия строк (метрик)
-  sh.getRange(topRow, 5, BLOCK_H, 1).setFontWeight('bold').setBackground('#f3f3f3');
+  // колонка F — названия строк (метрик)
+  sh.getRange(topRow, 6, BLOCK_H, 1).setFontWeight('bold').setBackground('#f3f3f3').setFontColor('#000000');
 
   // высота строки обложки
   sh.setRowHeight(topRow + IMAGE_ROW_OFFSET, IMAGE_ROW_HEIGHT);
@@ -320,7 +336,7 @@ function readManualValues_(sh) {
     const sku = String(values[top][0] || '').trim();
     if (!sku) continue;
     for (let li = 0; li < BLOCK_H; li++) {
-      const label = values[top + li][4];  // col E (0-based index 4) — названия строк
+      const label = values[top + li][5];  // col F (0-based index 5) — названия строк
       if (MANUAL_LABELS.indexOf(label) < 0) continue;
       for (let i = 0; i < nDays; i++) {
         const dk = dayKeys[i];
