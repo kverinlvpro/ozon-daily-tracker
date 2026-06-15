@@ -55,15 +55,14 @@ h3 { font-size: 13px; font-weight: bold; color: #1a73e8; margin-bottom: 10px; }
 
 /* ── Target ── */
 .target-lbl { font-size: 11px; color: #555; margin-bottom: 5px; }
-.radio-row  { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
-.radio-row input { margin: 0; cursor: pointer; }
 
-/* ── SKU selector (shown when "one block" selected) ── */
-#sku-wrap { margin: 6px 0 0 18px; }
-select#sku-sel {
-  width: 100%; padding: 4px 6px; border: 1px solid #dadce0;
-  border-radius: 4px; font-size: 12px; color: #333;
+/* ── SKU input ── */
+#sku-input {
+  width: 100%; padding: 6px 8px; border: 1px solid #dadce0;
+  border-radius: 4px; font-size: 12px; color: #333; outline: none;
 }
+#sku-input:focus { border-color: #1a73e8; }
+.sku-hint { font-size: 10px; color: #aaa; margin-top: 3px; margin-bottom: 2px; }
 
 /* ── Buttons ── */
 .btn-row { display: flex; gap: 8px; margin-top: 10px; }
@@ -101,18 +100,10 @@ select#sku-sel {
     <div class="val" id="range-val">— не выбран —</div>
   </div>
 
-  <div class="target-lbl">Применить к:</div>
-  <label class="radio-row">
-    <input type="radio" name="tgt" value="one" checked onchange="onTargetChange()">
-    <span id="one-lbl">текущему блоку</span>
-  </label>
-  <label class="radio-row">
-    <input type="radio" name="tgt" value="all" onchange="onTargetChange()">
-    всем блокам на листе
-  </label>
-  <div id="sku-wrap">
-    <select id="sku-sel"></select>
-  </div>
+  <div class="target-lbl">Артикул (SKU):</div>
+  <input type="text" id="sku-input" placeholder="вставь SKU, напр. T1-00012585"
+         autocomplete="off" spellcheck="false">
+  <div class="sku-hint">оставь пустым — применить ко всем блокам</div>
 
   <div class="btn-row">
     <button class="btn btn-clear" onclick="clearSel()">Сбросить</button>
@@ -142,23 +133,12 @@ function init(d){
   if(d.error){ showErr(d.error); return; }
   D = d;
 
-  // Fill SKU dropdown
-  var sel = document.getElementById('sku-sel');
-  sel.innerHTML = '';
-  d.skus.forEach(function(s, i){
-    var o = document.createElement('option');
-    o.value = s.sku;
-    o.textContent = s.sku + (s.name ? '  –  ' + s.name : '');
-    if(i === d.activeBlockIdx) o.selected = true;
-    sel.appendChild(o);
-  });
-
-  // Label for "one block" = active block
+    // Preload SKU of active block into input
   var ab = d.skus[d.activeBlockIdx];
-  if(ab) document.getElementById('one-lbl').textContent = 'блоку «' + ab.sku + '»';
-
-  // Preload existing range of active block
-  if(ab && ab.existing) tryPreload(ab.existing);
+  if(ab){
+    document.getElementById('sku-input').value = ab.sku;
+    if(ab.existing) tryPreload(ab.existing);
+  }
 
   // Init calendar to today
   var now = new Date(d.today + 'T12:00:00');
@@ -285,21 +265,10 @@ function clearSel(){
 function prevMonth(){ vM--; if(vM<0){vM=11;vY--;} render(); }
 function nextMonth(){ vM++; if(vM>11){vM=0;vY++;} render(); }
 
-function onTargetChange(){
-  var v=document.querySelector('input[name="tgt"]:checked').value;
-  document.getElementById('sku-wrap').style.display=(v==='one'?'block':'none');
-}
-
 function doApply(){
   if(!s1) return;
-  var tgt = document.querySelector('input[name="tgt"]:checked').value;
-  var selectedSkus;
-  if(tgt==='all'){
-    selectedSkus='all';
-  } else {
-    var skuSel=document.getElementById('sku-sel');
-    selectedSkus=[skuSel.value];
-  }
+  var raw = document.getElementById('sku-input').value.trim();
+  var selectedSkus = raw ? [raw] : 'all';
 
   var btn=document.getElementById('apply-btn');
   var st=document.getElementById('status');
